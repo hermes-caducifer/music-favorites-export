@@ -6,19 +6,17 @@ Poi usa [SpotiFLAC-Next](https://github.com/spotbye/SpotiFLAC-Next) per scaricar
 ## Setup
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+uv sync
 ```
 
 ## YouTube Music
 
 ```bash
 # Prima volta: autenticazione interattiva (si apre il browser)
-ytmusicapi setup --file browser.json
+uv run ytmusicapi setup --file browser.json
 
 # Poi esporta
-python3 export.py --ytmusic
+uv run music-export --ytmusic
 ```
 
 `ytmusicapi setup` ti chiederà di copiare gli header HTTP dalla DevTools del browser.
@@ -28,14 +26,14 @@ Istruzioni dettagliate: https://ytmusicapi.readthedocs.io/en/latest/setup.html
 
 ### Preferiti pubblici
 ```bash
-python3 export.py --deezer --deezer-user-id 12345678
+uv run music-export --deezer --deezer-user-id 12345678
 ```
 
 Per trovare il tuo user ID: vai su https://www.deezer.com/profile — il numero nell'URL è il tuo ID.
 
 ### Preferiti privati (richiede ARL token)
 ```bash
-python3 export.py --deezer --deezer-arl YOUR_ARL_TOKEN
+uv run music-export --deezer --deezer-arl YOUR_ARL_TOKEN
 ```
 
 Per trovare l'ARL token: DevTools → Application → Cookies → deezer.com → `arl`
@@ -43,7 +41,7 @@ Per trovare l'ARL token: DevTools → Application → Cookies → deezer.com →
 ## Esporta tutto
 
 ```bash
-python3 export.py --ytmusic --deezer --deezer-user-id 12345678
+uv run music-export --ytmusic --deezer --deezer-user-id 12345678
 ```
 
 Output: `favorites.json` con formato:
@@ -65,16 +63,15 @@ Per batch: incolla i nomi "Artist - Title" dal file `favorites.json` nella searc
 ### Alternativa: deemix (gratis, Deezer diretto)
 
 ```bash
-pip install deemix
-deemix --arl YOUR_ARL_TOKEN -p ./downloads -f FLAC "ARTIST - TITLE"
+uvx deemix --arl YOUR_ARL_TOKEN -p ./downloads -f FLAC "ARTIST - TITLE"
 ```
 
 ## Formati di output alternativi
 
 ```bash
-# Spotify URI (per spotDL)
-python3 export.py --ytmusic --format spotify-uri
-
 # Plain text (un brano per riga)
-python3 export.py --ytmusic --format plain
+uv run music-export --ytmusic --format plain
+
+# Output su file custom
+uv run music-export --ytmusic -o my_songs.txt
 ```
