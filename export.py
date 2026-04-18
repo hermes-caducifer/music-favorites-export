@@ -232,8 +232,27 @@ def export_ytmusic() -> list[dict]:
     try:
         liked = yt.get_liked_songs(limit=10000)
     except Exception as e:
-        # If unauthorized, maybe cookies expired? Try re-setup
-        if "401" in str(e) or "Unauthorized" in str(e):
+        error_str = str(e)
+        # Debug: try a simple request to see what YouTube returns
+        if "Expecting value" in error_str:
+            print("ERROR: YouTube returned an empty/non-JSON response.")
+            print("  This usually means the cookies are invalid or expired.")
+            # Try a raw request to see what we get
+            try:
+                import requests as _req
+                with open(auth_file) as f:
+                    headers = json.load(f)
+                resp = _req.post(
+                    "https://music.youtube.com/youtubei/v1/browse",
+                    headers=headers,
+                    json={"browseId": "FEmusic_liked_videos", "context": {"client": {"clientName": "WEB_REMIX", "clientVersion": "1.20240403.01.00"}}},
+                    timeout=15,
+                )
+                print(f"  HTTP Status: {resp.status_code}")
+                print(f"  Response (first 500 chars): {resp.text[:500]}")
+            except Exception as debug_e:
+                print(f"  Debug request also failed: {debug_e}")
+        elif "401" in error_str or "Unauthorized" in error_str:
             print("Auth error. Retrying setup from LibreWolf...")
             if setup_from_browser():
                 yt = YTMusic(str(auth_file))
@@ -242,7 +261,7 @@ def export_ytmusic() -> list[dict]:
                 return []
         else:
             print(f"ERROR: Failed to fetch liked songs: {e}")
-            return []
+        return []
 
     for t in liked.get("tracks", []):
         artists = ", ".join(a.get("name", "") for a in t.get("artists", []))
