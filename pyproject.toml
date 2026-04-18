@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "ytmusicapi>=1.0",
     "requests>=2.28",
-    "rookiepy==0.5.4",
+    "cryptography>=46.0.7",
 ]
 
 [project.scripts]
