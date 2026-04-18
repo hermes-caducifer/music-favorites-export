@@ -554,25 +554,40 @@ def download_tracks(tracks):
         print("\n🚀 SpotiFLAC CLI not found. Please ensure 'spotiflac' binary exists in the current directory.")
         sys.exit(1)
 
-    print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
-    import subprocess
-    for t in tracks:
-        # Clean query: SpotiFLAC Go CLI handles better without album if it's "None"
-        query = f"{t['artist']} - {t['title']}"
-        if t.get('album') and t['album'] != "None":
-            query += f" - {t['album']}"
-            
-        print(f"  Searching FLAC for: {query}")
-        try:
-            # SpotiFLAC Go CLI: just pass the query as the first argument
-            cmd = [
-                str(spotiflac_bin.absolute()),
-                query
-            ]
-            subprocess.run(cmd, check=True)
-            print(f"    ✅ Downloaded.")
-        except Exception as e:
-            print(f"    ❌ Failed: {e}")
+        if all_tracks and args.download:
+            print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
+            import subprocess
+            for t in all_tracks:
+                # Clean query: SpotiFLAC Go CLI handles better without album if it's "None"
+                query = f"{t['artist']} - {t['title']}"
+                if t.get('album') and t['album'] != "None":
+                    query += f" - {t['album']}"
+                
+                # IMPORTANT: The Go CLI expects the query as a SINGLE POSITIONAL ARGUMENT.
+                # If it sees spaces and it's not quoted by the shell, it might fail.
+                # subprocess.run with a list handles quoting automatically.
+                
+                print(f"  Searching FLAC for: {query}")
+                try:
+                    # Execute the binary directly. 
+                    # We do NOT use 'search:' prefix.
+                    # We do NOT use any other flags unless we want to specify output.
+                    # If it complains about "Unrecognized argument", we use -- for argument termination
+                    cmd = [
+                        str(spotiflac_bin.absolute()),
+                        "--",
+                        query
+                    ]
+                    
+                    # SpotiFLAC Go CLI doesn't use the standard flag-first pattern for simple queries.
+                    # If it still complains about "Unrecognized argument", it's because it's 
+                    # trying to parse the query as a flag. We'll use "--" to terminate flag parsing if needed,
+                    # but let's first try just the query.
+                    
+                    subprocess.run(cmd, check=True)
+                    print(f"    ✅ Downloaded.")
+                except Exception as e:
+                    print(f"    ❌ Failed: {e}")
 
 
 def main():
