@@ -551,40 +551,36 @@ def download_tracks(tracks):
     
     spotiflac_bin = Path("./spotiflac")
     if not spotiflac_bin.exists():
-        print("\n🚀 SpotiFLAC CLI not found. Compiling with headless tag...")
-        try:
-            import subprocess
-            # Clone SpotiFLAC if not exists
-            repo_dir = Path("SpotiFLAC")
-            if not repo_dir.exists():
-                subprocess.run(["git", "clone", "https://github.com/spotbye/SpotiFLAC-Next.git", "SpotiFLAC"], check=True)
-            
-            # Build headless CLI
-            print("Compiling SpotiFLAC from source...")
-            subprocess.run(["go", "mod", "tidy"], cwd=repo_dir, check=True)
-            subprocess.run(["go", "build", "-o", "../spotiflac", "."], cwd=repo_dir, check=True)
-            print("✅ SpotiFLAC CLI compiled successfully.")
-        except Exception as e:
-            print(f"❌ Failed to compile SpotiFLAC: {e}")
-            sys.exit(1)
+            print(f"\n🚀 SpotiFLAC CLI not found. Installing Python package instead...")
+            try:
+                import subprocess
+                subprocess.run(["pip", "install", "spotiflac"], check=True)
+                import spotiflac
+                print("✅ SpotiFLAC Python package installed.")
+            except Exception as e:
+                print(f"❌ Failed to install SpotiFLAC: {e}")
+                sys.exit(1)
 
-    print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
-    import subprocess
-    for t in tracks:
-        query = f"{t['artist']} - {t['title']} - {t['album']}"
-        print(f"  Searching FLAC for: {query}")
-        try:
-            # SpotiFLAC CLI usage: ./spotiflac "search:Artist - Title - Album"
-            cmd = [
-                str(spotiflac_bin.absolute()),
-                f"search:{query}"
-            ]
-            # Note: We assume the user has configured output path in spotiflac settings
-            # or we could try to pass it if SpotiFLAC CLI supports it.
-            subprocess.run(cmd, check=True)
-            print(f"    ✅ Downloaded.")
-        except Exception as e:
-            print(f"    ❌ Failed: {e}")
+            print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
+            import spotiflac
+            for t in tracks:
+                query = f"{t['artist']} - {t['title']} - {t['album']}"
+                print(f"  Searching FLAC for: {query}")
+                try:
+                    # Use SpotiFLAC Python API
+                    results = spotiflac.search(query)
+                    if results:
+                        # Download the first result
+                        spotiflac.download(results[0]["id"], download_path)
+                        print(f"    ✅ Downloaded.")
+                    else:
+                        print(f"    ❌ No results found.")
+                except Exception as e:
+                    print(f"    ❌ Failed: {e}")
+                
+                # Rate limiting to avoid API abuse
+                time.sleep(1)
+
 
 def main():
     parser = argparse.ArgumentParser(
