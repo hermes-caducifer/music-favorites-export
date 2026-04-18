@@ -83,12 +83,18 @@ def _extract_cookies_from_db(cookies_db: Path, domains: list[str]) -> dict[str, 
     """Read cookies from cookies.sqlite for the given domains.
 
     Firefox/LibreWolf stores cookie values in plaintext in the 'value' column.
+    With Total Cookie Protection (dFPI), cookies are partitioned by top-level site.
+    We prefer cookies partitioned under music.youtube.com, then fall back to
+    unpartitioned cookies.
     """
     # Copy the database to a temp file to avoid locking issues with the browser
     with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
         tmp_path = Path(tmp.name)
 
     shutil.copy2(cookies_db, tmp_path)
+
+    # Partition key for music.youtube.com (URL-encoded in originAttributes)
+    ytm_partition = "%28https%2Cmusic.youtube.com%29"
 
     cookies = {}
     try:
@@ -103,14 +109,45 @@ def _extract_cookies_from_db(cookies_db: Path, domains: list[str]) -> dict[str, 
 
         where_clause = " OR ".join(conditions)
 
-        rows = conn.execute(
-            f"SELECT name, value, host FROM moz_cookies WHERE {where_clause}",
-            params
-        ).fetchall()
+        # Try to read with originAttributes column (Total Cookie Protection)
+        # moz_cookies has: name, value, host, originAttributes
+        try:
+            rows = conn.execute(
+                f"SELECT name, value, host, originAttributes FROM moz_cookies WHERE {where_clause}",
+                params
+            ).fetchall()
 
-        for name, value, host in rows:
-            if value:
-                cookies[name] = value
+            # Pass 1: prefer cookies partitioned under music.youtube.com
+            for name, value, host, origin_attrs in rows:
+                if not value:
+                    continue
+                if ytm_partition in (origin_attrs or ""):
+                    cookies[name] = value
+
+            # Pass 2: fill in missing cookies from unpartitioned entries
+            for name, value, host, origin_attrs in rows:
+                if not value:
+                    continue
+                if name not in cookies and not origin_attrs:
+                    cookies[name] = value
+
+            # Pass 3: last resort — any cookie we still don't have
+            for name, value, host, origin_attrs in rows:
+                if not value:
+                    continue
+                if name not in cookies:
+                    cookies[name] = value
+
+        except sqlite3.OperationalError:
+            # Older Firefox without originAttributes column
+            rows = conn.execute(
+                f"SELECT name, value, host FROM moz_cookies WHERE {where_clause}",
+                params
+            ).fetchall()
+
+            for name, value, host in rows:
+                if value:
+                    cookies[name] = value
     finally:
         conn.close()
         tmp_path.unlink(missing_ok=True)
@@ -385,11 +422,51 @@ def main():
     parser.add_argument("--output", "-o", type=str, default=OUTPUT_FILE,
                         help=f"Output file (default: {OUTPUT_FILE})")
     parser.add_argument("--setup", action="store_true", help="Force automatic setup from LibreWolf")
+    parser.add_argument("--debug-cookies", action="store_true", help="Show cookie extraction details for debugging")
 
     args = parser.parse_args()
 
     if args.setup:
         setup_from_browser()
+        sys.exit(0)
+
+    if args.debug_cookies:
+        try:
+            profile = _find_librewolf_profile()
+            print(f"Profile: {profile}")
+            cookies_db = profile / "cookies.sqlite"
+            import tempfile as _tf
+            with _tf.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+            shutil.copy2(cookies_db, tmp_path)
+            conn = sqlite3.connect(str(tmp_path))
+            # Check schema
+            cols = conn.execute("PRAGMA table_info(moz_cookies)").fetchall()
+            print(f"\nmoz_cookies columns: {[c[1] for c in cols]}")
+            # Show auth cookies with their originAttributes
+            try:
+                rows = conn.execute(
+                    "SELECT name, host, length(value), originAttributes FROM moz_cookies "
+                    "WHERE host LIKE '%youtube.com%' OR host LIKE '%google.com%' "
+                    "ORDER BY originAttributes, name"
+                ).fetchall()
+                print(f"\nYouTube/Google cookies ({len(rows)} total):")
+                for name, host, val_len, attrs in rows:
+                    print(f"  {name:30s} {host:35s} len={val_len:5d} attrs={attrs}")
+            except sqlite3.OperationalError as e:
+                print(f"  originAttributes column missing: {e}")
+                rows = conn.execute(
+                    "SELECT name, host, length(value) FROM moz_cookies "
+                    "WHERE host LIKE '%youtube.com%' OR host LIKE '%google.com%' "
+                    "ORDER BY name"
+                ).fetchall()
+                print(f"\nYouTube/Google cookies ({len(rows)} total):")
+                for name, host, val_len in rows:
+                    print(f"  {name:30s} {host:35s} len={val_len}")
+            conn.close()
+            tmp_path.unlink(missing_ok=True)
+        except Exception as e:
+            print(f"Error: {e}")
         sys.exit(0)
 
     if not args.ytmusic and not args.deezer:
