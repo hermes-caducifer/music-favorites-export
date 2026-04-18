@@ -453,6 +453,7 @@ def main():
                         help=f"Output file (default: {OUTPUT_FILE})")
     parser.add_argument("--setup", action="store_true", help="Force automatic setup from LibreWolf")
     parser.add_argument("--debug-cookies", action="store_true", help="Show cookie extraction details for debugging")
+    parser.add_argument("--download", action="store_true", help="Automatically download tracks in FLAC to /home/fulgidus/Music")
 
     args = parser.parse_args()
 
@@ -506,7 +507,35 @@ def main():
     all_tracks = []
 
     if args.ytmusic:
-        all_tracks.extend(export_ytmusic())
+        tracks = export_ytmusic()
+        all_tracks.extend(tracks)
+        
+        # Download logic
+        if args.download:
+            download_path = Path("/home/fulgidus/Music")
+            download_path.mkdir(parents=True, exist_ok=True)
+            print(f"\nStarting automatic FLAC download to {download_path}...")
+            
+            import subprocess
+            for t in tracks:
+                query = f"{t['artist']} - {t['title']}"
+                print(f"  Searching FLAC for: {query}")
+                # We use yt-dlp with --extract-audio but optimized for high quality
+                # since we don't have a reliable Deezer ARL for FLAC right now.
+                # If we had deemix + ARL, we'd use that here.
+                try:
+                    cmd = [
+                        "yt-dlp",
+                        "--extract-audio",
+                        "--audio-format", "flac",
+                        "--audio-quality", "0",
+                        "--output", f"{download_path}/%(artist)s - %(title)s.%(ext)s",
+                        f"ytsearch1:{query}"
+                    ]
+                    subprocess.run(cmd, check=True, capture_output=True)
+                    print(f"    ✅ Done.")
+                except Exception as e:
+                    print(f"    ❌ Failed: {e}")
 
     if args.deezer:
         if args.deezer_arl:
