@@ -14,13 +14,21 @@ Usage:
 
 import argparse
 import configparser
+import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+try:
+    from ytmusicapi import YTMusic
+except ImportError:
+    print("❌ Critical: ytmusicapi not found. Install it with: pip install ytmusicapi")
+    sys.exit(1)
 
 OUTPUT_FILE = "favorites.json"
 
