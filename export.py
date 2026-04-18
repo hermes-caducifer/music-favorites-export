@@ -156,8 +156,16 @@ def setup_from_browser():
         print("   Make sure you've logged into YouTube Music in LibreWolf recently.")
         return False
 
-    # Build the cookie string
-    cookie_str = "; ".join(f"{name}={value}" for name, value in cookies.items())
+    # ytmusicapi only needs specific auth cookies, not all 200+
+    # Sending everything causes HTTP 413 (Request Entity Too Large)
+    AUTH_COOKIE_NAMES = {
+        "HSID", "SSID", "APISID", "SAPISID", "SID", "SIDCC",
+        "__Secure-1PSID", "__Secure-3PSID", "__Secure-3PAPISID",
+        "__Secure-1PSIDTS", "__Secure-3PSIDTS",
+        "LOGIN_INFO", "SIDCC", "NID",
+    }
+    auth_cookies = {k: v for k, v in cookies.items() if k in AUTH_COOKIE_NAMES}
+    cookie_str = "; ".join(f"{name}={value}" for name, value in auth_cookies.items())
 
     if not cookie_str:
         print("❌ Cookie string is empty.")
