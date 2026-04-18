@@ -12,14 +12,19 @@ uv sync
 ## YouTube Music
 
 ```bash
-# Prima volta: autenticazione interattiva (si apre il browser)
-uv run ytmusicapi setup --file browser.json
-
-# Poi esporta
+# Auto-setup: ruba i cookie da LibreWolf automaticamente
 uv run music-export --ytmusic
+
+# Oppure forza il setup senza esportare
+uv run music-export --setup
 ```
 
-`ytmusicapi setup` ti chiederà di copiare gli header HTTP dalla DevTools del browser.
+Se hai effettuato il login a YouTube Music su LibreWolf, il setup è automatico — nessun browser wizard, nessun OAuth.
+
+Se non usi LibreWolf, puoi ancora fare il setup manuale:
+```bash
+uv run ytmusicapi setup --file browser.json
+```
 Istruzioni dettagliate: https://ytmusicapi.readthedocs.io/en/latest/setup.html
 
 ## Deezer

@@ -25,39 +25,24 @@ OUTPUT_FILE = "favorites.json"
 # YouTube Music
 # ---------------------------------------------------------------------------
 
-LIBREWOLF_PATHS = [
-    "~/.librewolf",
-    "~/.config/librewolf/librewolf",
-    "~/snap/librewolf/common/.librewolf",
-]
-
-
-def _find_librewolf_cookies(domain: str):
-    """Try multiple LibreWolf profile paths until one works."""
-    import browser_cookie3
-    from browser_cookie3 import BrowserCookieError
-
-    # First try the library's built-in detection
-    try:
-        return browser_cookie3.librewolf(domain_name=domain)
-    except BrowserCookieError:
-        pass
-
-    # Fallback: manually search known paths and pass cookie_file explicitly
-    import glob as glob_mod
-    for base in LIBREWOLF_PATHS:
-        expanded = Path(base).expanduser()
-        if not expanded.is_dir():
-            continue
-        # Find cookies.sqlite inside profile subdirs
-        for cookie_file in sorted(expanded.glob("**/cookies.sqlite")):
-            try:
-                return browser_cookie3.librewolf(
-                    cookie_file=str(cookie_file), domain_name=domain
-                )
-            except Exception:
-                continue
-    raise BrowserCookieError("Could not find LibreWolf cookies in any known path")
+def _grab_cookies_rookiepy(domain: str) -> list[dict]:
+    """Extract cookies using rookiepy (Rust-based, handles NSS decryption)."""
+    import rookiepy
+    cookies = rookiepy.librewolf(domains=[domain])
+    if not cookies:
+        # Fallback: try firefox_based with LibreWolf paths
+        from pathlib import Path
+        for base in ["~/.config/librewolf/librewolf", "~/.librewolf"]:
+            expanded = Path(base).expanduser()
+            if expanded.is_dir():
+                for cookie_db in sorted(expanded.glob("**/cookies.sqlite")):
+                    try:
+                        cookies = rookiepy.load(str(cookie_db), domains=[domain])
+                        if cookies:
+                            return cookies
+                    except Exception:
+                        continue
+    return cookies
 
 
 def setup_from_browser():
@@ -68,27 +53,32 @@ def setup_from_browser():
         print("ERROR: ytmusicapi not installed.")
         return False
 
+    domain = "music.youtube.com"
+    cookie_str = ""
+
+    # rookiepy handles NSS decryption natively in Rust
     print("Attempting to grab YouTube Music cookies from LibreWolf...")
     try:
-        cj = _find_librewolf_cookies(domain='music.youtube.com')
-        
-        # We need to extract headers that ytmusicapi understands
-        # ytmusicapi wants a 'headers' dict or a string block
-        cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
-        
-        if not cookie_str:
-            print("❌ No cookies found for music.youtube.com in LibreWolf.")
-            return False
-
-        # Construct raw headers string (minimal set)
-        headers_raw = f"Cookie: {cookie_str}\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"
-        
-        YTMusic.setup(filepath="browser.json", headers_raw=headers_raw)
-        print("✅ browser.json generated successfully from LibreWolf cookies!")
-        return True
+        cookies = _grab_cookies_rookiepy(domain)
+        if cookies:
+            cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
     except Exception as e:
-        print(f"❌ Failed to grab cookies: {e}")
+        print(f"  rookiepy failed: {e}")
+
+    if not cookie_str:
+        print("❌ No cookies found for music.youtube.com in LibreWolf.")
+        print("   Make sure you've logged into YouTube Music in LibreWolf recently.")
         return False
+
+    # Construct raw headers string for ytmusicapi
+    headers_raw = (
+        f"Cookie: {cookie_str}\n"
+        f"User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
+    )
+
+    YTMusic.setup(filepath="browser.json", headers_raw=headers_raw)
+    print("✅ browser.json generated from LibreWolf cookies!")
+    return True
 
 
 def export_ytmusic() -> list[dict]:
