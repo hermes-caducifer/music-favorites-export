@@ -316,7 +316,7 @@ def get_librewolf_cookies():
 
     # Copy to bypass potential LibreWolf lock
     tmp_db = Path('/tmp/ytmusic_cookies.sqlite')
-    import shutil, sqlite3, json, time, hashlib
+    import shutil, sqlite3, json, time, hashlib, os
     shutil.copy2(db_path, tmp_db)
     
     try:
@@ -327,6 +327,9 @@ def get_librewolf_cookies():
         c.execute(query)
         rows = dict(c.fetchall())
         conn.close()
+    except sqlite3.OperationalError as e:
+        print(f"❌ SQLite error: {e}")
+        return None
     finally:
         if tmp_db.exists():
             os.remove(tmp_db)
