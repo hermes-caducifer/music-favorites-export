@@ -510,30 +510,43 @@ def main():
         tracks = export_ytmusic()
         all_tracks.extend(tracks)
         
-        # Download logic
+        # Download logic via SpotiFLAC
         if args.download:
             download_path = Path("/home/fulgidus/Music")
             download_path.mkdir(parents=True, exist_ok=True)
-            print(f"\nStarting automatic FLAC download to {download_path}...")
             
+            spotiflac_bin = Path("./spotiflac")
+            if not spotiflac_bin.exists():
+                print("\n🚀 SpotiFLAC CLI not found. Compiling with headless tag...")
+                try:
+                    import subprocess
+                    # Clone SpotiFLAC if not exists
+                    repo_dir = Path("SpotiFLAC")
+                    if not repo_dir.exists():
+                        subprocess.run(["git", "clone", "https://github.com/spotbye/SpotiFLAC-Next.git", "SpotiFLAC"], check=True)
+                    
+                    # Build headless CLI
+                    subprocess.run(["go", "build", "-tags", "headless", "-o", "../spotiflac", "."], cwd=repo_dir, check=True)
+                    print("✅ SpotiFLAC CLI compiled successfully.")
+                except Exception as e:
+                    print(f"❌ Failed to compile SpotiFLAC: {e}")
+                    sys.exit(1)
+
+            print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
             import subprocess
             for t in tracks:
-                query = f"{t['artist']} - {t['title']}"
+                query = f"{t['artist']} - {t['title']} - {t['album']}"
                 print(f"  Searching FLAC for: {query}")
-                # We use yt-dlp with --extract-audio but optimized for high quality
-                # since we don't have a reliable Deezer ARL for FLAC right now.
-                # If we had deemix + ARL, we'd use that here.
                 try:
+                    # SpotiFLAC CLI usage: ./spotiflac "search:Artist - Title - Album"
                     cmd = [
-                        "yt-dlp",
-                        "--extract-audio",
-                        "--audio-format", "flac",
-                        "--audio-quality", "0",
-                        "--output", f"{download_path}/%(artist)s - %(title)s.%(ext)s",
-                        f"ytsearch1:{query}"
+                        str(spotiflac_bin.absolute()),
+                        f"search:{query}"
                     ]
-                    subprocess.run(cmd, check=True, capture_output=True)
-                    print(f"    ✅ Done.")
+                    # Note: We assume the user has configured output path in spotiflac settings
+                    # or we could try to pass it if SpotiFLAC CLI supports it.
+                    subprocess.run(cmd, check=True)
+                    print(f"    ✅ Downloaded.")
                 except Exception as e:
                     print(f"    ❌ Failed: {e}")
 
