@@ -163,20 +163,32 @@ def setup_from_browser():
         print("❌ Cookie string is empty.")
         return False
 
-    # ytmusicapi requires both 'cookie' and 'x-goog-authuser' headers
-    # x-goog-authuser is typically "0" for the first logged-in Google account
-    # We also need to look for the SAPISIDHASH which is computed dynamically
-    # but ytmusicapi handles that internally if we provide the right cookies
+    # ytmusicapi requires: cookie, x-goog-authuser, AND authorization (SAPISIDHASH)
+    # SAPISIDHASH is computed from __Secure-3PAPISID cookie + origin + timestamp
+    # determine_auth_type() checks for "SAPISIDHASH" in authorization to identify browser auth
+    # Without it, ytmusicapi thinks the file is OAuth and crashes
 
-    # Try to find x-goog-authuser value from the cookie jar
-    # The authuser is usually 0 for the default account
+    # Compute SAPISIDHASH
+    sapisid = cookies.get("__Secure-3PAPISID", "")
+    if not sapisid:
+        print("❌ Missing __Secure-3PAPISID cookie. Are you logged into YouTube Music?")
+        return False
+
+    import hashlib
+    import time as _time
+    origin = "https://music.youtube.com"
+    unix_timestamp = str(int(_time.time()))
+    sha_1 = hashlib.sha1()
+    sha_1.update(f"{unix_timestamp} {sapisid} {origin}".encode("utf-8"))
+    sapisidhash = f"SAPISIDHASH {unix_timestamp}_{sha_1.hexdigest()}"
+
     authuser = "0"
 
-    # Build headers_raw in the format ytmusicapi.setup_browser expects:
-    # One header per line, "Key: Value" format
+    # Build headers_raw in the format ytmusicapi.setup_browser expects
     headers_raw = "\n".join([
         f"cookie: {cookie_str}",
         f"x-goog-authuser: {authuser}",
+        f"authorization: {sapisidhash}",
     ])
 
     try:
@@ -185,20 +197,6 @@ def setup_from_browser():
         return True
     except Exception as e:
         print(f"❌ ytmusicapi setup failed: {e}")
-        # If it fails because of missing x-goog-authuser, try with different authuser values
-        if "x-goog-authuser" in str(e).lower():
-            print("   Trying with different authuser values...")
-            for au in ["0", "1", "2"]:
-                try:
-                    headers_raw = "\n".join([
-                        f"cookie: {cookie_str}",
-                        f"x-goog-authuser: {au}",
-                    ])
-                    ytm_setup(filepath="browser.json", headers_raw=headers_raw)
-                    print(f"✅ browser.json generated with authuser={au}!")
-                    return True
-                except Exception:
-                    continue
         return False
 
 
