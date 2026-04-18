@@ -551,35 +551,28 @@ def download_tracks(tracks):
     
     spotiflac_bin = Path("./spotiflac")
     if not spotiflac_bin.exists():
-            print(f"\n🚀 SpotiFLAC CLI not found. Installing Python package instead...")
-            try:
-                import subprocess
-                subprocess.run(["pip", "install", "spotiflac"], check=True)
-                import spotiflac
-                print("✅ SpotiFLAC Python package installed.")
-            except Exception as e:
-                print(f"❌ Failed to install SpotiFLAC: {e}")
-                sys.exit(1)
+        print("\n🚀 SpotiFLAC CLI not found. Please ensure 'spotiflac' binary exists in the current directory.")
+        sys.exit(1)
 
-            print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
-            import spotiflac
-            for t in tracks:
-                query = f"{t['artist']} - {t['title']} - {t['album']}"
-                print(f"  Searching FLAC for: {query}")
-                try:
-                    # Use SpotiFLAC Python API
-                    results = spotiflac.search(query)
-                    if results:
-                        # Download the first result
-                        spotiflac.download(results[0]["id"], download_path)
-                        print(f"    ✅ Downloaded.")
-                    else:
-                        print(f"    ❌ No results found.")
-                except Exception as e:
-                    print(f"    ❌ Failed: {e}")
-                
-                # Rate limiting to avoid API abuse
-                time.sleep(1)
+    print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
+    import subprocess
+    for t in tracks:
+        # Clean query: SpotiFLAC Go CLI handles better without album if it's "None"
+        query = f"{t['artist']} - {t['title']}"
+        if t.get('album') and t['album'] != "None":
+            query += f" - {t['album']}"
+            
+        print(f"  Searching FLAC for: {query}")
+        try:
+            # SpotiFLAC Go CLI: just pass the query as the first argument
+            cmd = [
+                str(spotiflac_bin.absolute()),
+                query
+            ]
+            subprocess.run(cmd, check=True)
+            print(f"    ✅ Downloaded.")
+        except Exception as e:
+            print(f"    ❌ Failed: {e}")
 
 
 def main():
