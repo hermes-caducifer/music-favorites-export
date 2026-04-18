@@ -526,7 +526,9 @@ def main():
                         subprocess.run(["git", "clone", "https://github.com/spotbye/SpotiFLAC-Next.git", "SpotiFLAC"], check=True)
                     
                     # Build headless CLI
-                    subprocess.run(["go", "build", "-tags", "headless", "-o", "../spotiflac", "."], cwd=repo_dir, check=True)
+                    print("Compiling SpotiFLAC from source...")
+                    subprocess.run(["go", "mod", "tidy"], cwd=repo_dir, check=True)
+                    subprocess.run(["go", "build", "-o", "../spotiflac", "."], cwd=repo_dir, check=True)
                     print("✅ SpotiFLAC CLI compiled successfully.")
                 except Exception as e:
                     print(f"❌ Failed to compile SpotiFLAC: {e}")
