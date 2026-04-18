@@ -25,19 +25,52 @@ OUTPUT_FILE = "favorites.json"
 # YouTube Music
 # ---------------------------------------------------------------------------
 
+LIBREWOLF_PATHS = [
+    "~/.librewolf",
+    "~/.config/librewolf/librewolf",
+    "~/snap/librewolf/common/.librewolf",
+]
+
+
+def _find_librewolf_cookies(domain: str):
+    """Try multiple LibreWolf profile paths until one works."""
+    import browser_cookie3
+    from browser_cookie3 import BrowserCookieError
+
+    # First try the library's built-in detection
+    try:
+        return browser_cookie3.librewolf(domain_name=domain)
+    except BrowserCookieError:
+        pass
+
+    # Fallback: manually search known paths and pass cookie_file explicitly
+    import glob as glob_mod
+    for base in LIBREWOLF_PATHS:
+        expanded = Path(base).expanduser()
+        if not expanded.is_dir():
+            continue
+        # Find cookies.sqlite inside profile subdirs
+        for cookie_file in sorted(expanded.glob("**/cookies.sqlite")):
+            try:
+                return browser_cookie3.librewolf(
+                    cookie_file=str(cookie_file), domain_name=domain
+                )
+            except Exception:
+                continue
+    raise BrowserCookieError("Could not find LibreWolf cookies in any known path")
+
+
 def setup_from_browser():
     """Tries to grab cookies from LibreWolf and setup browser.json automatically."""
     try:
-        import browser_cookie3
         from ytmusicapi import YTMusic
     except ImportError:
-        print("ERROR: browser-cookie3 or ytmusicapi not installed.")
+        print("ERROR: ytmusicapi not installed.")
         return False
 
     print("Attempting to grab YouTube Music cookies from LibreWolf...")
     try:
-        # LibreWolf is usually just a profile away from Firefox format
-        cj = browser_cookie3.librewolf(domain_name='music.youtube.com')
+        cj = _find_librewolf_cookies(domain='music.youtube.com')
         
         # We need to extract headers that ytmusicapi understands
         # ytmusicapi wants a 'headers' dict or a string block
