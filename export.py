@@ -86,6 +86,11 @@ def _extract_cookies_from_db(cookies_db: Path, domains: list[str]) -> dict[str, 
     With Total Cookie Protection (dFPI), cookies are partitioned by top-level site.
     We prefer cookies partitioned under music.youtube.com, then fall back to
     unpartitioned cookies.
+
+    IMPORTANT: When the same cookie name exists on multiple domains (e.g.
+    HSID on both .youtube.com and .google.com), we must use the value from
+    the domain that matches the target site. A request to music.youtube.com
+    only sends .youtube.com cookies — NOT .google.com cookies.
     """
     # Copy the database to a temp file to avoid locking issues with the browser
     with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
@@ -96,11 +101,15 @@ def _extract_cookies_from_db(cookies_db: Path, domains: list[str]) -> dict[str, 
     # Partition key for music.youtube.com (URL-encoded in originAttributes)
     ytm_partition = "%28https%2Cmusic.youtube.com%29"
 
+    # We only want cookies from .youtube.com and music.youtube.com
+    # The browser never sends .google.com cookies to music.youtube.com
+    ytm_domains = {".youtube.com", "music.youtube.com", "youtube.com"}
+
     cookies = {}
     try:
         conn = sqlite3.connect(str(tmp_path))
 
-        # Build WHERE clause for all domains
+        # Build WHERE clause for all domains (to find candidates)
         conditions = []
         params = []
         for domain in domains:
@@ -110,7 +119,6 @@ def _extract_cookies_from_db(cookies_db: Path, domains: list[str]) -> dict[str, 
         where_clause = " OR ".join(conditions)
 
         # Try to read with originAttributes column (Total Cookie Protection)
-        # moz_cookies has: name, value, host, originAttributes
         try:
             rows = conn.execute(
                 f"SELECT name, value, host, originAttributes FROM moz_cookies WHERE {where_clause}",
@@ -124,18 +132,18 @@ def _extract_cookies_from_db(cookies_db: Path, domains: list[str]) -> dict[str, 
                 if ytm_partition in (origin_attrs or ""):
                     cookies[name] = value
 
-            # Pass 2: fill in missing cookies from unpartitioned entries
+            # Pass 2: fill in missing from .youtube.com unpartitioned cookies
             for name, value, host, origin_attrs in rows:
                 if not value:
                     continue
-                if name not in cookies and not origin_attrs:
+                if name not in cookies and host in ytm_domains and not origin_attrs:
                     cookies[name] = value
 
-            # Pass 3: last resort — any cookie we still don't have
+            # Pass 3: last resort — any .youtube.com cookie
             for name, value, host, origin_attrs in rows:
                 if not value:
                     continue
-                if name not in cookies:
+                if name not in cookies and host in ytm_domains:
                     cookies[name] = value
 
         except sqlite3.OperationalError:
@@ -146,7 +154,7 @@ def _extract_cookies_from_db(cookies_db: Path, domains: list[str]) -> dict[str, 
             ).fetchall()
 
             for name, value, host in rows:
-                if value:
+                if value and host in ytm_domains:
                     cookies[name] = value
     finally:
         conn.close()
@@ -199,7 +207,9 @@ def setup_from_browser():
         "HSID", "SSID", "APISID", "SAPISID", "SID", "SIDCC",
         "__Secure-1PSID", "__Secure-3PSID", "__Secure-3PAPISID",
         "__Secure-1PSIDTS", "__Secure-3PSIDTS",
-        "LOGIN_INFO", "SIDCC", "NID",
+        "__Secure-1PSIDCC", "__Secure-3PSIDCC",
+        "__Secure-1PAPISID",
+        "LOGIN_INFO", "NID",
     }
     auth_cookies = {k: v for k, v in cookies.items() if k in AUTH_COOKIE_NAMES}
     cookie_str = "; ".join(f"{name}={value}" for name, value in auth_cookies.items())
