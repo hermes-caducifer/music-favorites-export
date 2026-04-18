@@ -184,7 +184,7 @@ wheels = [
 [[package]]
 name = "music-favorites-export"
 version = "1.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "browser-cookie3" },
     { name = "requests" },
