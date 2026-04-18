@@ -30,6 +30,14 @@ LIBREWOLF_PROFILE_PATHS = [
     "~/snap/librewolf/common/.librewolf",
 ]
 
+# ytmusicapi requires cookies from these domains
+YTMUSIC_COOKIE_DOMAINS = [
+    ".youtube.com",
+    "music.youtube.com",
+    ".google.com",
+    "accounts.google.com",
+]
+
 
 # ---------------------------------------------------------------------------
 # LibreWolf cookie extraction
@@ -71,11 +79,10 @@ def _find_librewolf_profile() -> Path | None:
     return None
 
 
-def _extract_cookies_from_db(cookies_db: Path, domain: str) -> dict[str, str]:
-    """Read cookies from cookies.sqlite.
+def _extract_cookies_from_db(cookies_db: Path, domains: list[str]) -> dict[str, str]:
+    """Read cookies from cookies.sqlite for the given domains.
 
     Firefox/LibreWolf stores cookie values in plaintext in the 'value' column.
-    There is no 'encrypted_value' column — that's a Chrome thing.
     """
     # Copy the database to a temp file to avoid locking issues with the browser
     with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
@@ -86,10 +93,19 @@ def _extract_cookies_from_db(cookies_db: Path, domain: str) -> dict[str, str]:
     cookies = {}
     try:
         conn = sqlite3.connect(str(tmp_path))
+
+        # Build WHERE clause for all domains
+        conditions = []
+        params = []
+        for domain in domains:
+            conditions.append("host LIKE ?")
+            params.append(f"%{domain}%")
+
+        where_clause = " OR ".join(conditions)
+
         rows = conn.execute(
-            "SELECT name, value, host FROM moz_cookies "
-            "WHERE host LIKE ? OR host LIKE ?",
-            (f"%{domain}", f".{domain}")
+            f"SELECT name, value, host FROM moz_cookies WHERE {where_clause}",
+            params
         ).fetchall()
 
         for name, value, host in rows:
@@ -102,8 +118,8 @@ def _extract_cookies_from_db(cookies_db: Path, domain: str) -> dict[str, str]:
     return cookies
 
 
-def _grab_librewolf_cookies(domain: str) -> dict[str, str]:
-    """Extract cookies from LibreWolf for the given domain."""
+def _grab_librewolf_cookies(domains: list[str]) -> dict[str, str]:
+    """Extract cookies from LibreWolf for the given domains."""
     profile = _find_librewolf_profile()
     if not profile:
         raise FileNotFoundError("Could not find LibreWolf profile directory")
@@ -112,7 +128,7 @@ def _grab_librewolf_cookies(domain: str) -> dict[str, str]:
     if not cookies_db.exists():
         raise FileNotFoundError(f"No cookies.sqlite in {profile}")
 
-    return _extract_cookies_from_db(cookies_db, domain)
+    return _extract_cookies_from_db(cookies_db, domains)
 
 
 # ---------------------------------------------------------------------------
@@ -122,41 +138,68 @@ def _grab_librewolf_cookies(domain: str) -> dict[str, str]:
 def setup_from_browser():
     """Tries to grab cookies from LibreWolf and setup browser.json automatically."""
     try:
-        from ytmusicapi import YTMusic
+        from ytmusicapi import setup as ytm_setup
     except ImportError:
         print("ERROR: ytmusicapi not installed.")
         return False
 
-    domain = "music.youtube.com"
     print("Attempting to grab YouTube Music cookies from LibreWolf...")
 
     try:
-        cookies = _grab_librewolf_cookies(domain)
+        cookies = _grab_librewolf_cookies(YTMUSIC_COOKIE_DOMAINS)
     except Exception as e:
         print(f"❌ Failed to access LibreWolf cookies: {e}")
         return False
 
     if not cookies:
-        print("❌ No cookies found for music.youtube.com in LibreWolf.")
+        print("❌ No cookies found for YouTube/Google domains in LibreWolf.")
         print("   Make sure you've logged into YouTube Music in LibreWolf recently.")
         return False
 
-    # ytmusicapi needs a Cookie header string
+    # Build the cookie string
     cookie_str = "; ".join(f"{name}={value}" for name, value in cookies.items())
 
     if not cookie_str:
         print("❌ Cookie string is empty.")
         return False
 
-    # Construct raw headers string for ytmusicapi
-    headers_raw = (
-        f"Cookie: {cookie_str}\n"
-        f"User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
-    )
+    # ytmusicapi requires both 'cookie' and 'x-goog-authuser' headers
+    # x-goog-authuser is typically "0" for the first logged-in Google account
+    # We also need to look for the SAPISIDHASH which is computed dynamically
+    # but ytmusicapi handles that internally if we provide the right cookies
 
-    YTMusic.setup(filepath="browser.json", headers_raw=headers_raw)
-    print(f"✅ browser.json generated from LibreWolf cookies ({len(cookies)} cookies)!")
-    return True
+    # Try to find x-goog-authuser value from the cookie jar
+    # The authuser is usually 0 for the default account
+    authuser = "0"
+
+    # Build headers_raw in the format ytmusicapi.setup_browser expects:
+    # One header per line, "Key: Value" format
+    headers_raw = "\n".join([
+        f"cookie: {cookie_str}",
+        f"x-goog-authuser: {authuser}",
+    ])
+
+    try:
+        ytm_setup(filepath="browser.json", headers_raw=headers_raw)
+        print(f"✅ browser.json generated from LibreWolf cookies ({len(cookies)} cookies)!")
+        return True
+    except Exception as e:
+        print(f"❌ ytmusicapi setup failed: {e}")
+        # If it fails because of missing x-goog-authuser, try with different authuser values
+        if "x-goog-authuser" in str(e).lower():
+            print("   Trying with different authuser values...")
+            for au in ["0", "1", "2"]:
+                try:
+                    headers_raw = "\n".join([
+                        f"cookie: {cookie_str}",
+                        f"x-goog-authuser: {au}",
+                    ])
+                    ytm_setup(filepath="browser.json", headers_raw=headers_raw)
+                    print(f"✅ browser.json generated with authuser={au}!")
+                    return True
+                except Exception:
+                    continue
+        return False
 
 
 def export_ytmusic() -> list[dict]:
