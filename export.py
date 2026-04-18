@@ -535,6 +535,57 @@ def format_json(tracks: list[dict]) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+def download_tracks(tracks):
+    """Download tracks using SpotiFLAC."""
+    # Flexible download path
+    download_path = Path("favorites-flac")
+    try:
+        # Try preferred path, fallback to current dir
+        pref_path = Path("/home/fulgidus/Music")
+        if os.access(pref_path.parent, os.W_OK):
+            download_path = pref_path
+        download_path.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        download_path = Path("favorites-flac")
+        download_path.mkdir(parents=True, exist_ok=True)
+    
+    spotiflac_bin = Path("./spotiflac")
+    if not spotiflac_bin.exists():
+        print("\n🚀 SpotiFLAC CLI not found. Compiling with headless tag...")
+        try:
+            import subprocess
+            # Clone SpotiFLAC if not exists
+            repo_dir = Path("SpotiFLAC")
+            if not repo_dir.exists():
+                subprocess.run(["git", "clone", "https://github.com/spotbye/SpotiFLAC-Next.git", "SpotiFLAC"], check=True)
+            
+            # Build headless CLI
+            print("Compiling SpotiFLAC from source...")
+            subprocess.run(["go", "mod", "tidy"], cwd=repo_dir, check=True)
+            subprocess.run(["go", "build", "-o", "../spotiflac", "."], cwd=repo_dir, check=True)
+            print("✅ SpotiFLAC CLI compiled successfully.")
+        except Exception as e:
+            print(f"❌ Failed to compile SpotiFLAC: {e}")
+            sys.exit(1)
+
+    print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
+    import subprocess
+    for t in tracks:
+        query = f"{t['artist']} - {t['title']} - {t['album']}"
+        print(f"  Searching FLAC for: {query}")
+        try:
+            # SpotiFLAC CLI usage: ./spotiflac "search:Artist - Title - Album"
+            cmd = [
+                str(spotiflac_bin.absolute()),
+                f"search:{query}"
+            ]
+            # Note: We assume the user has configured output path in spotiflac settings
+            # or we could try to pass it if SpotiFLAC CLI supports it.
+            subprocess.run(cmd, check=True)
+            print(f"    ✅ Downloaded.")
+        except Exception as e:
+            print(f"    ❌ Failed: {e}")
+
 def main():
     parser = argparse.ArgumentParser(
         description="Export music favorites from YouTube Music and Deezer"
@@ -596,69 +647,37 @@ def main():
             print(f"Error: {e}")
         sys.exit(0)
 
-    if not args.ytmusic and not args.deezer:
+    if not args.ytmusic and not args.deezer and not args.download:
         parser.print_help()
         sys.exit(1)
 
     all_tracks = []
 
-    if args.ytmusic:
+    # If --download is passed without a source flag, but favorites.json exists, use it.
+    if args.download and not (args.ytmusic or args.deezer) and Path(args.output).exists():
         try:
-            tracks = export_ytmusic()
-            all_tracks.extend(tracks)
+            with open(args.output, "r") as f:
+                all_tracks = json.load(f)
+            print(f"Loaded {len(all_tracks)} tracks from {args.output}")
         except Exception as e:
-            print(f"❌ Failed to fetch YT Music tracks: {e}")
-            tracks = []
+            print(f"❌ Error loading {args.output}: {e}")
+            sys.exit(1)
 
+    if args.download and not (args.ytmusic or args.deezer):
+        # Case: standalone --download using loaded favorites.json
+        if not all_tracks:
+            print("❌ No tracks to download. Provide --ytmusic/--deezer or ensure favorites.json exists.")
+            sys.exit(1)
+        
+        # Reuse the download logic
+        download_tracks(all_tracks)
+        sys.exit(0)
+
+    if args.ytmusic:
+        tracks = export_ytmusic()
+        all_tracks.extend(tracks)
         if args.download and tracks:
-            # Flexible download path
-            download_path = Path("favorites-flac")
-            try:
-                # Try preferred path, fallback to current dir
-                pref_path = Path("/home/fulgidus/Music")
-                if os.access(pref_path.parent, os.W_OK):
-                    download_path = pref_path
-                download_path.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                download_path = Path("favorites-flac")
-                download_path.mkdir(parents=True, exist_ok=True)
-            
-            spotiflac_bin = Path("./spotiflac")
-            if not spotiflac_bin.exists():
-                print("\n🚀 SpotiFLAC CLI not found. Compiling with headless tag...")
-                try:
-                    import subprocess
-                    # Clone SpotiFLAC if not exists
-                    repo_dir = Path("SpotiFLAC")
-                    if not repo_dir.exists():
-                        subprocess.run(["git", "clone", "https://github.com/spotbye/SpotiFLAC-Next.git", "SpotiFLAC"], check=True)
-                    
-                    # Build headless CLI
-                    print("Compiling SpotiFLAC from source...")
-                    subprocess.run(["go", "mod", "tidy"], cwd=repo_dir, check=True)
-                    subprocess.run(["go", "build", "-o", "../spotiflac", "."], cwd=repo_dir, check=True)
-                    print("✅ SpotiFLAC CLI compiled successfully.")
-                except Exception as e:
-                    print(f"❌ Failed to compile SpotiFLAC: {e}")
-                    sys.exit(1)
-
-            print(f"\n🎵 Starting automatic FLAC download to {download_path}...")
-            import subprocess
-            for t in tracks:
-                query = f"{t['artist']} - {t['title']} - {t['album']}"
-                print(f"  Searching FLAC for: {query}")
-                try:
-                    # SpotiFLAC CLI usage: ./spotiflac "search:Artist - Title - Album"
-                    cmd = [
-                        str(spotiflac_bin.absolute()),
-                        f"search:{query}"
-                    ]
-                    # Note: We assume the user has configured output path in spotiflac settings
-                    # or we could try to pass it if SpotiFLAC CLI supports it.
-                    subprocess.run(cmd, check=True)
-                    print(f"    ✅ Downloaded.")
-                except Exception as e:
-                    print(f"    ❌ Failed: {e}")
+            download_tracks(tracks)
 
     if args.deezer:
         if args.deezer_arl:
