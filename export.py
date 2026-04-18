@@ -255,14 +255,44 @@ def setup_from_browser():
         return False
 
 
-def export_ytmusic() -> list[dict]:
-    """Export liked songs from YouTube Music."""
-    from ytmusicapi import YTMusic
-    from ytmusicapi.exceptions import YTMusicUserError
-
+def export_ytmusic():
+    """Export liked songs from YouTube Music using local LibreWolf cookies."""
     auth_file = Path("browser.json")
     if not auth_file.exists():
         print("browser.json not found. Attempting automatic setup...")
+        cookies = get_librewolf_cookies()
+        if cookies:
+            with open(auth_file, 'w') as f:
+                json.dump(cookies, f, indent=2)
+            print("✅ browser.json created from LibreWolf cookies.")
+        else:
+            print("❌ Failed to extract cookies from LibreWolf.")
+            print("Please perform manual setup: uv run ytmusicapi setup --file browser.json")
+            return []
+
+    try:
+        yt = YTMusic(str(auth_file))
+        print("Fetching YouTube Music liked songs...")
+        playlists = yt.get_library_playlists(limit=1)
+        if not playlists:
+            print("❌ No playlists found or not logged in.")
+            return []
+
+        liked_id = next((p['playlistId'] for p in playlists if p['title'].lower() == 'liked songs'), None)
+        if not liked_id:
+            print("❌ 'Liked Songs' playlist not found.")
+            return []
+
+        songs = yt.get_playlist(liked_id)
+        if not songs or 'tracks' not in songs:
+            print("❌ No songs found in liked playlist.")
+            return []
+
+        print(f"✅ Found {len(songs['tracks'])} liked songs.")
+        return songs['tracks']
+    except Exception as e:
+        print(f"❌ Failed to fetch liked songs: {e}")
+        return []
 def get_librewolf_cookies():
     """Silently extract YouTube Music auth cookies from LibreWolf profile."""
     profile_base = Path('/home/fulgidus/.config/librewolf/librewolf/')
