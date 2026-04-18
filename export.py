@@ -263,10 +263,65 @@ def export_ytmusic() -> list[dict]:
     auth_file = Path("browser.json")
     if not auth_file.exists():
         print("browser.json not found. Attempting automatic setup...")
-        if not setup_from_browser():
-            print("\nERROR: Automatic setup failed.")
-            print("Please perform manual setup: uv run ytmusicapi setup --file browser.json")
-            return []
+def get_librewolf_cookies():
+    """Silently extract YouTube Music auth cookies from LibreWolf profile."""
+    profile_base = Path('/home/fulgidus/.config/librewolf/librewolf/')
+    if not profile_base.exists():
+        # Fallback to general home if not hardcoded
+        profile_base = Path('~/.config/librewolf/librewolf/').expanduser()
+    
+    if not profile_base.exists():
+        return None
+
+    # Find the correct profile folder
+    profiles = [p for p in profile_base.iterdir() if p.is_dir() and ('.default' in p.name or 'default-release' in p.name)]
+    if not profiles:
+        return None
+    
+    # Sort to get the most likely one (default-default)
+    profile = sorted(profiles, key=lambda p: 'default-default' in p.name, reverse=True)[0]
+    db_path = profile / 'cookies.sqlite'
+    if not db_path.exists():
+        return None
+
+    # Copy to bypass potential LibreWolf lock
+    tmp_db = Path('/tmp/ytmusic_cookies.sqlite')
+    import shutil, sqlite3, json, time, hashlib
+    shutil.copy2(db_path, tmp_db)
+    
+    try:
+        conn = sqlite3.connect(tmp_db)
+        c = conn.cursor()
+        targets = ('SID', 'HSID', 'SSID', 'APISID', 'SAPISID', '__Secure-3PAPISID', '__Secure-3PSID', 'LOGIN_INFO')
+        query = f"SELECT name, value FROM moz_cookies WHERE host LIKE '%youtube.com%' AND name IN {targets}"
+        c.execute(query)
+        rows = dict(c.fetchall())
+        conn.close()
+    finally:
+        if tmp_db.exists():
+            os.remove(tmp_db)
+
+    if not rows:
+        return None
+
+    cookie_str = '; '.join([f'{k}={v}' for k, v in rows.items()])
+    
+    # Generate SAPISIDHASH (Required for ytmusicapi browser auth)
+    sapisid = rows.get('SAPISID') or rows.get('__Secure-3PAPISID')
+    auth_header = ""
+    if sapisid:
+        timestamp = str(int(time.time()))
+        origin = "https://music.youtube.com"
+        payload = f"{timestamp} {sapisid} {origin}"
+        sapisid_hash = hashlib.sha1(payload.encode()).hexdigest()
+        auth_header = f"SAPISIDHASH {timestamp}_{sapisid_hash}"
+
+    return {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
+        "Cookie": cookie_str,
+        "X-Goog-AuthUser": "0",
+        "Authorization": auth_header
+    }
 
     try:
         yt = YTMusic(str(auth_file))
