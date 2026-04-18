@@ -25,30 +25,69 @@ OUTPUT_FILE = "favorites.json"
 # YouTube Music
 # ---------------------------------------------------------------------------
 
-def export_ytmusic() -> list[dict]:
-    """Export liked songs from YouTube Music."""
+def setup_from_browser():
+    """Tries to grab cookies from LibreWolf and setup browser.json automatically."""
     try:
+        import browser_cookie3
         from ytmusicapi import YTMusic
     except ImportError:
-        print("ERROR: ytmusicapi not installed. Run: pip install ytmusicapi")
-        return []
+        print("ERROR: browser-cookie3 or ytmusicapi not installed.")
+        return False
+
+    print("Attempting to grab YouTube Music cookies from LibreWolf...")
+    try:
+        # LibreWolf is usually just a profile away from Firefox format
+        cj = browser_cookie3.librewolf(domain_name='music.youtube.com')
+        
+        # We need to extract headers that ytmusicapi understands
+        # ytmusicapi wants a 'headers' dict or a string block
+        cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
+        
+        if not cookie_str:
+            print("❌ No cookies found for music.youtube.com in LibreWolf.")
+            return False
+
+        # Construct raw headers string (minimal set)
+        headers_raw = f"Cookie: {cookie_str}\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"
+        
+        YTMusic.setup(filepath="browser.json", headers_raw=headers_raw)
+        print("✅ browser.json generated successfully from LibreWolf cookies!")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to grab cookies: {e}")
+        return False
+
+
+def export_ytmusic() -> list[dict]:
+    """Export liked songs from YouTube Music."""
+    from ytmusicapi import YTMusic
 
     auth_file = Path("browser.json")
     if not auth_file.exists():
-        print("ERROR: browser.json not found.")
-        print("Run: ytmusicapi setup --file browser.json")
-        print("See: https://ytmusicapi.readthedocs.io/en/latest/setup.html")
-        return []
+        print("browser.json not found. Attempting automatic setup...")
+        if not setup_from_browser():
+            print("\nERROR: Automatic setup failed.")
+            print("Please perform manual setup: uv run ytmusicapi setup --file browser.json")
+            return []
 
     yt = YTMusic(str(auth_file))
     tracks = []
 
     print("Fetching YouTube Music liked songs...")
     try:
-        liked = yt.get_liked_songs(limit=5000)
+        liked = yt.get_liked_songs(limit=10000)
     except Exception as e:
-        print(f"ERROR: Failed to fetch liked songs: {e}")
-        return []
+        # If unauthorized, maybe cookies expired?
+        if "401" in str(e) or "Unauthorized" in str(e):
+            print("Auth error. Retrying setup...")
+            if setup_from_browser():
+                yt = YTMusic(str(auth_file))
+                liked = yt.get_liked_songs(limit=10000)
+            else:
+                return []
+        else:
+            print(f"ERROR: Failed to fetch liked songs: {e}")
+            return []
 
     for t in liked.get("tracks", []):
         artists = ", ".join(a.get("name", "") for a in t.get("artists", []))
@@ -163,8 +202,13 @@ def main():
                         help="Output format (default: json)")
     parser.add_argument("--output", "-o", type=str, default=OUTPUT_FILE,
                         help=f"Output file (default: {OUTPUT_FILE})")
+    parser.add_argument("--setup", action="store_true", help="Force automatic setup from LibreWolf")
 
     args = parser.parse_args()
+
+    if args.setup:
+        setup_from_browser()
+        sys.exit(0)
 
     if not args.ytmusic and not args.deezer:
         parser.print_help()
