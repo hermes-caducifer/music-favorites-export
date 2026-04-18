@@ -507,13 +507,25 @@ def main():
     all_tracks = []
 
     if args.ytmusic:
-        tracks = export_ytmusic()
-        all_tracks.extend(tracks)
-        
-        # Download logic via SpotiFLAC
-        if args.download:
-            download_path = Path("/home/fulgidus/Music")
-            download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            tracks = export_ytmusic()
+            all_tracks.extend(tracks)
+        except Exception as e:
+            print(f"❌ Failed to fetch YT Music tracks: {e}")
+            tracks = []
+
+        if args.download and tracks:
+            # Flexible download path
+            download_path = Path("favorites-flac")
+            try:
+                # Try preferred path, fallback to current dir
+                pref_path = Path("/home/fulgidus/Music")
+                if os.access(pref_path.parent, os.W_OK):
+                    download_path = pref_path
+                download_path.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                download_path = Path("favorites-flac")
+                download_path.mkdir(parents=True, exist_ok=True)
             
             spotiflac_bin = Path("./spotiflac")
             if not spotiflac_bin.exists():
