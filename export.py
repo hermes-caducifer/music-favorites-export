@@ -378,27 +378,47 @@ def export_deezer_public(user_id: int) -> list[dict]:
 # Deezer (ARL token — private favorites)
 # ---------------------------------------------------------------------------
 
-def export_deezer_arl(arl_token: str) -> list[dict]:
-    """Export favorites from Deezer using ARL token (for private libraries)."""
+def _grab_deezer_arl() -> str | None:
+    """Try to find the ARL cookie for Deezer in LibreWolf."""
+    try:
+        cookies = _grab_librewolf_cookies(["deezer.com"])
+        return cookies.get("arl")
+    except Exception:
+        return None
+
+
+def export_deezer() -> list[dict]:
+    """Export Deezer favorites. Tries ARL from LibreWolf, then public API."""
     import requests
 
-    session = requests.Session()
-    session.cookies.set("arl", arl_token, domain=".deezer.com")
+    # Try to get ARL from LibreWolf cookies
+    arl = _grab_deezer_arl()
+    if arl:
+        print(f"Found Deezer ARL in LibreWolf cookies (len={len(arl)})")
+        session = requests.Session()
+        session.cookies.set("arl", arl, domain=".deezer.com")
 
-    # Get user info
-    resp = session.get("https://api.deezer.com/user/me", timeout=30)
-    resp.raise_for_status()
-    me = resp.json()
+        # Verify the ARL is valid
+        resp = session.get("https://api.deezer.com/user/me", timeout=30)
+        resp.raise_for_status()
+        me = resp.json()
 
-    if "error" in me:
-        print(f"  ERROR: Invalid ARL token: {me['error']}")
-        return []
+        if "error" not in me:
+            user_id = me.get("id")
+            print(f"  Authenticated as {me.get('name', 'unknown')} (ID: {user_id})")
+            return export_deezer_public(user_id)
+        else:
+            print(f"  ARL from LibreWolf is invalid/expired: {me['error']}")
+            print("  Falling back to public API...")
 
-    user_id = me.get("id")
-    print(f"  Authenticated as {me.get('name', 'unknown')} (ID: {user_id})")
-
-    # Fall back to public API with the user ID
-    return export_deezer_public(user_id)
+    # No valid ARL — check if we can get user ID from public profile
+    print("No valid Deezer ARL found in LibreWolf cookies.")
+    print("  Deezer requires authentication for private libraries.")
+    print("  Options:")
+    print("    1. Log into deezer.com in LibreWolf (may require VPN if blocked in your country)")
+    print("    2. Pass --deezer-arl YOUR_ARL manually")
+    print("    3. Pass --deezer-user-id YOUR_ID for public favorites")
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -490,12 +510,23 @@ def main():
 
     if args.deezer:
         if args.deezer_arl:
-            all_tracks.extend(export_deezer_arl(args.deezer_arl))
+            # Manual ARL override
+            import requests
+            session = requests.Session()
+            session.cookies.set("arl", args.deezer_arl, domain=".deezer.com")
+            resp = session.get("https://api.deezer.com/user/me", timeout=30)
+            me = resp.json()
+            if "error" in me:
+                print(f"  ERROR: Invalid ARL token: {me['error']}")
+                sys.exit(1)
+            user_id = me.get("id")
+            print(f"  Authenticated as {me.get('name', 'unknown')} (ID: {user_id})")
+            all_tracks.extend(export_deezer_public(user_id))
         elif args.deezer_user_id:
             all_tracks.extend(export_deezer_public(args.deezer_user_id))
         else:
-            print("ERROR: --deezer requires --deezer-user-id or --deezer-arl")
-            sys.exit(1)
+            # Auto: try LibreWolf cookies, then give helpful error
+            all_tracks.extend(export_deezer())
 
     if not all_tracks:
         print("No tracks exported.")
