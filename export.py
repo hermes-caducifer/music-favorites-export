@@ -203,6 +203,7 @@ def setup_from_browser():
 def export_ytmusic() -> list[dict]:
     """Export liked songs from YouTube Music."""
     from ytmusicapi import YTMusic
+    from ytmusicapi.exceptions import YTMusicUserError
 
     auth_file = Path("browser.json")
     if not auth_file.exists():
@@ -212,7 +213,19 @@ def export_ytmusic() -> list[dict]:
             print("Please perform manual setup: uv run ytmusicapi setup --file browser.json")
             return []
 
-    yt = YTMusic(str(auth_file))
+    try:
+        yt = YTMusic(str(auth_file))
+    except YTMusicUserError as e:
+        if "oauth" in str(e).lower():
+            # browser.json is malformed (e.g. missing SAPISIDHASH) — regenerate it
+            print(f"browser.json is invalid ({e}). Regenerating from LibreWolf...")
+            auth_file.unlink(missing_ok=True)
+            if not setup_from_browser():
+                print("ERROR: Automatic setup failed.")
+                return []
+            yt = YTMusic(str(auth_file))
+        else:
+            raise
     tracks = []
 
     print("Fetching YouTube Music liked songs...")
